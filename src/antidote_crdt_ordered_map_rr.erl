@@ -71,7 +71,7 @@
 -type effect() ::
      {Adds::[nested_downstream()], Removed::[nested_downstream()]}.
 -type nested_downstream() :: {typedKey(), none | {ok, Effect::term()}}.
--type value() :: orddict:orddict(typedKey(), term()).
+-type value() :: gb_trees:tree(typedKey(), term()).
 
 -spec new() -> state().
 new() ->
