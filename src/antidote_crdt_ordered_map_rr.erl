@@ -51,7 +51,8 @@
 
 %% API
 -export([new/0, value/1, update/2, equal/2, get/2,
-  to_binary/1, from_binary/1, is_operation/1, downstream/2, require_state_downstream/1, is_bottom/1]).
+  to_binary/1, from_binary/1, is_operation/1, downstream/2, require_state_downstream/1, is_bottom/1,
+  predecessor/2, predecessor_eq/2, successor/2, successor_eq/2]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -87,6 +88,61 @@ value(Map) ->
 get({_K, _Type}=Key, Map) ->
   gb_trees:get(Key, Map).
 
+% returns the greatest key in the map that is less than the given Key
+% returns none if no such key is present in the map
+-spec predecessor(typedKey(), state()) -> none | typedKey().
+predecessor(Key, {_, Node}) ->
+  predecessor_node(Key, Node, none).
+
+predecessor_node(Key, {K, _, _, RightNode}, _) when K < Key ->
+  predecessor_node(Key, RightNode, K);
+predecessor_node(Key, {_, _, LeftNode, _}, Pred) ->
+  predecessor_node(Key, LeftNode, Pred);
+predecessor_node(_, nil, Pred) ->
+  Pred.
+
+% returns the greatest key in the map that is less than or equal to the given Key
+% returns none if no such key is present in the map
+-spec predecessor_eq(typedKey(), state()) -> none | typedKey().
+predecessor_eq(Key, {_, Node}) ->
+  predecessor_eq_node(Key, Node, none).
+
+predecessor_eq_node(Key, {K, _, _, RightNode}, _) when K < Key ->
+  predecessor_eq_node(Key, RightNode, K);
+predecessor_eq_node(Key, {K, _, LeftNode, _}, Pred) when Key < K ->
+  predecessor_eq_node(Key, LeftNode, Pred);
+predecessor_eq_node(_, {K, _, _, _}, _) ->
+  K;
+predecessor_eq_node(_, nil, Pred) ->
+  Pred.
+
+% returns the lowest key in the map that is greater than the given Key
+% returns none if no such key is present in the map
+-spec successor(typedKey(), state()) -> none | typedKey().
+successor(Key, {_, Node}) ->
+  successor_node(Key, Node, none).
+
+successor_node(Key, {K, _, LeftNode, _}, _) when Key < K ->
+  successor_node(Key, LeftNode, K);
+successor_node(Key, {_, _, _, RightNode}, Succ) ->
+  successor_node(Key, RightNode, Succ);
+successor_node(_, nil, Succ) ->
+  Succ.
+
+% returns the lowest key in the map that is greater than or equal to the given Key
+% returns none if no such key is present in the map
+-spec successor_eq(typedKey(), state()) -> none | typedKey().
+successor_eq(Key, {_, Node}) ->
+  successor_eq_node(Key, Node, none).
+
+successor_eq_node(Key, {K, _, LeftNode, _}, _) when Key < K ->
+  successor_eq_node(Key, LeftNode, K);
+successor_eq_node(Key, {K, _, _, RightNode}, Succ) when K < Key ->
+  successor_eq_node(Key, RightNode, Succ);
+successor_eq_node(_, {K, _, _, _}, _) ->
+  K;
+successor_eq_node(_, nil, Succ) ->
+  Succ.
 
 -spec require_state_downstream(op()) -> boolean().
 require_state_downstream(_Op) ->
@@ -379,17 +435,37 @@ remove_test() ->
   M2 = upd({update, [
       {{<<"a">>, antidote_crdt_orset}, {add, <<"1">>}},
       {{<<"b">>, antidote_crdt_mvreg}, {assign, <<"2">>}},
+      {{<<"c">>, antidote_crdt_orset}, {add, <<"3">>}},
       {{<<"c">>, antidote_crdt_fat_counter}, {increment, 1}}
     ]}, M1),
   ?assertEqual([
       {{<<"a">>, antidote_crdt_orset}, [<<"1">>]},
       {{<<"b">>, antidote_crdt_mvreg}, [<<"2">>]},
-      {{<<"c">>, antidote_crdt_fat_counter}, 1}
+      {{<<"c">>, antidote_crdt_fat_counter}, 1},
+      {{<<"c">>, antidote_crdt_orset}, [<<"3">>]}
   ], value(M2)),
   ?assertEqual(false, is_bottom(M2)),
   M3 = upd({reset, {}}, M2),
   ?assertEqual([], value(M3)),
   ?assertEqual(true, is_bottom(M3)),
   ok.
+
+predecessor_successor_test() ->
+    M1 = new(),
+    M2 = upd({update, [
+        {{<<"size/0001">>, antidote_crdt_orset}, {add, <<"obj1">>}},
+        {{<<"size/0002">>, antidote_crdt_orset}, {add, <<"obj2">>}},
+        {{<<"size/0004">>, antidote_crdt_orset}, {add, <<"obj4">>}},
+        {{<<"size/0005">>, antidote_crdt_orset}, {add, <<"obj5">>}}
+      ]}, M1),
+    ?assertEqual({<<"size/0002">>, antidote_crdt_orset}, predecessor({<<"size/0004">>, antidote_crdt_orset}, M2)),
+    ?assertEqual({<<"size/0004">>, antidote_crdt_orset}, predecessor_eq({<<"size/0004">>, antidote_crdt_orset}, M2)),
+    ?assertEqual({<<"size/0005">>, antidote_crdt_orset}, predecessor_eq({<<"size/0006">>, antidote_crdt_orset}, M2)),
+    ?assertEqual(none, predecessor({<<"size/0001">>, antidote_crdt_orset}, M2)),
+    ?assertEqual({<<"size/0005">>, antidote_crdt_orset}, successor({<<"size/0004">>, antidote_crdt_orset}, M2)),
+    ?assertEqual(none, successor({<<"size/0005">>, antidote_crdt_orset}, M2)),
+    ?assertEqual({<<"size/0002">>, antidote_crdt_orset}, successor_eq({<<"size/0002">>, antidote_crdt_orset}, M2)),
+    ?assertEqual({<<"size/0001">>, antidote_crdt_orset}, successor_eq({<<"size/0000">>, antidote_crdt_orset}, M2)),
+    ok.
 
 -endif.
