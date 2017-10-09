@@ -52,7 +52,7 @@
 %% API
 -export([new/0, value/1, update/2, equal/2, get/2,
   to_binary/1, from_binary/1, is_operation/1, downstream/2, require_state_downstream/1, is_bottom/1,
-  predecessor/2, predecessor_eq/2, successor/2, successor_eq/2]).
+  range_keys/3, range_values/3]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -88,61 +88,46 @@ value(Map) ->
 get({_K, _Type}=Key, Map) ->
   gb_trees:get(Key, Map).
 
-% returns the greatest key in the map that is less than the given Key
-% returns none if no such key is present in the map
--spec predecessor(typedKey(), state()) -> none | typedKey().
-predecessor(Key, {_, Node}) ->
-  predecessor_node(Key, Node, none).
+-spec range_keys({typedKey(), inclusive | exclusive} | {inf, exclusive},
+    {typedKey(), inclusive | exclusive} | {inf, exclusive}, state())
+    -> [typedKey()] | none.
+range_keys(LowerBound, UpperBound, Map) ->
+  range(LowerBound, UpperBound, fun(Result, K, _) -> Result ++ [K] end, Map).
 
-predecessor_node(Key, {K, _, _, RightNode}, _) when K < Key ->
-  predecessor_node(Key, RightNode, K);
-predecessor_node(Key, {_, _, LeftNode, _}, Pred) ->
-  predecessor_node(Key, LeftNode, Pred);
-predecessor_node(_, nil, Pred) ->
-  Pred.
+-spec range_values({typedKey(), inclusive | exclusive} | {inf, exclusive},
+    {typedKey(), inclusive | exclusive} | {inf, exclusive}, state())
+    -> [value()] | none.
+range_values(LowerBound, UpperBound, Map) ->
+  range(LowerBound, UpperBound, fun(Result, {K, T}, V) -> Result ++ [{{K, T}, T:value(V)}] end, Map).
 
-% returns the greatest key in the map that is less than or equal to the given Key
-% returns none if no such key is present in the map
--spec predecessor_eq(typedKey(), state()) -> none | typedKey().
-predecessor_eq(Key, {_, Node}) ->
-  predecessor_eq_node(Key, Node, none).
+range({inf, exclusive}, UpperBound, F, Map) ->
+  Iter = gb_trees:iterator(Map),
+  range_iter(UpperBound, gb_trees:next(Iter), F, []);
+range({LowerBound, exclusive}, UpperBound, F, Map) ->
+  Iter = gb_trees:iterator_from(LowerBound, Map),
+  {_, _, I} = gb_trees:next(Iter),
+  range_iter(UpperBound, gb_trees:next(I), F, []);
+range({LowerBound, inclusive}, UpperBound, F, Map) ->
+  Iter = gb_trees:iterator_from(LowerBound, Map),
+  range_iter(UpperBound, gb_trees:next(Iter), F, []).
 
-predecessor_eq_node(Key, {K, _, _, RightNode}, _) when K < Key ->
-  predecessor_eq_node(Key, RightNode, K);
-predecessor_eq_node(Key, {K, _, LeftNode, _}, Pred) when Key < K ->
-  predecessor_eq_node(Key, LeftNode, Pred);
-predecessor_eq_node(_, {K, _, _, _}, _) ->
-  K;
-predecessor_eq_node(_, nil, Pred) ->
-  Pred.
+range_iter({inf, exclusive}, {K, V, I}, F, Result) ->
+  range_iter({inf, exclusive}, gb_trees:next(I), F, F(Result, K, V));
+range_iter({UpperBound, _}, {K, _, _}, _, Result) when K > UpperBound ->
+  range_return(Result);
+range_iter({K, inclusive}, {K, _, _}, _, Result) ->
+  range_return(Result ++ [K]);
+range_iter({K, exclusive}, {K, _, _}, _, Result) ->
+  range_return(Result);
+range_iter(_, none, _, Result) ->
+  range_return(Result);
+range_iter(UpperBound, {K, V, I}, F, Result) ->
+  range_iter(UpperBound, gb_trees:next(I), F, F(Result, K, V)).
 
-% returns the lowest key in the map that is greater than the given Key
-% returns none if no such key is present in the map
--spec successor(typedKey(), state()) -> none | typedKey().
-successor(Key, {_, Node}) ->
-  successor_node(Key, Node, none).
-
-successor_node(Key, {K, _, LeftNode, _}, _) when Key < K ->
-  successor_node(Key, LeftNode, K);
-successor_node(Key, {_, _, _, RightNode}, Succ) ->
-  successor_node(Key, RightNode, Succ);
-successor_node(_, nil, Succ) ->
-  Succ.
-
-% returns the lowest key in the map that is greater than or equal to the given Key
-% returns none if no such key is present in the map
--spec successor_eq(typedKey(), state()) -> none | typedKey().
-successor_eq(Key, {_, Node}) ->
-  successor_eq_node(Key, Node, none).
-
-successor_eq_node(Key, {K, _, LeftNode, _}, _) when Key < K ->
-  successor_eq_node(Key, LeftNode, K);
-successor_eq_node(Key, {K, _, _, RightNode}, Succ) when K < Key ->
-  successor_eq_node(Key, RightNode, Succ);
-successor_eq_node(_, {K, _, _, _}, _) ->
-  K;
-successor_eq_node(_, nil, Succ) ->
-  Succ.
+range_return([]) ->
+  none;
+range_return(R) ->
+  R.
 
 -spec require_state_downstream(op()) -> boolean().
 require_state_downstream(_Op) ->
@@ -450,22 +435,72 @@ remove_test() ->
   ?assertEqual(true, is_bottom(M3)),
   ok.
 
-predecessor_successor_test() ->
-    M1 = new(),
-    M2 = upd({update, [
-        {{<<"size/0001">>, antidote_crdt_orset}, {add, <<"obj1">>}},
-        {{<<"size/0002">>, antidote_crdt_orset}, {add, <<"obj2">>}},
-        {{<<"size/0004">>, antidote_crdt_orset}, {add, <<"obj4">>}},
-        {{<<"size/0005">>, antidote_crdt_orset}, {add, <<"obj5">>}}
-      ]}, M1),
-    ?assertEqual({<<"size/0002">>, antidote_crdt_orset}, predecessor({<<"size/0004">>, antidote_crdt_orset}, M2)),
-    ?assertEqual({<<"size/0004">>, antidote_crdt_orset}, predecessor_eq({<<"size/0004">>, antidote_crdt_orset}, M2)),
-    ?assertEqual({<<"size/0005">>, antidote_crdt_orset}, predecessor_eq({<<"size/0006">>, antidote_crdt_orset}, M2)),
-    ?assertEqual(none, predecessor({<<"size/0001">>, antidote_crdt_orset}, M2)),
-    ?assertEqual({<<"size/0005">>, antidote_crdt_orset}, successor({<<"size/0004">>, antidote_crdt_orset}, M2)),
-    ?assertEqual(none, successor({<<"size/0005">>, antidote_crdt_orset}, M2)),
-    ?assertEqual({<<"size/0002">>, antidote_crdt_orset}, successor_eq({<<"size/0002">>, antidote_crdt_orset}, M2)),
-    ?assertEqual({<<"size/0001">>, antidote_crdt_orset}, successor_eq({<<"size/0000">>, antidote_crdt_orset}, M2)),
-    ok.
+range_test() ->
+  M1 = new(),
+  M2 = upd({update, [
+    {{<<"size/0001">>, antidote_crdt_orset}, {add, <<"obj1">>}},
+    {{<<"size/0002">>, antidote_crdt_orset}, {add, <<"obj2">>}},
+    {{<<"size/0004">>, antidote_crdt_orset}, {add, <<"obj4">>}},
+    {{<<"size/0005">>, antidote_crdt_orset}, {add, <<"obj5">>}}
+  ]}, M1),
+  %upper bound is lower than smallest key
+  ?assertEqual(none, range_keys({{<<"size/0000">>, antidote_crdt_orset}, exclusive},
+                                {{<<"size/0001">>, antidote_crdt_orset}, exclusive}, M2)),
+  %lower bound is higher than largest key
+  ?assertEqual(none, range_keys({{<<"size/0005">>, antidote_crdt_orset}, exclusive},
+                                {{<<"size/0006">>, antidote_crdt_orset}, exclusive}, M2)),
+  %lower bound infinite
+  ?assertEqual([
+  {<<"size/0001">>, antidote_crdt_orset},
+  {<<"size/0002">>, antidote_crdt_orset}
+  ], range_keys({inf, exclusive},
+                {{<<"size/0004">>, antidote_crdt_orset}, exclusive}, M2)),
+
+  %upper bound infinite
+  ?assertEqual([
+    {<<"size/0002">>, antidote_crdt_orset},
+    {<<"size/0004">>, antidote_crdt_orset},
+    {<<"size/0005">>, antidote_crdt_orset}
+  ], range_keys({{<<"size/0002">>, antidote_crdt_orset}, inclusive},
+                {inf, exclusive}, M2)),
+
+  %both bounds infinite
+  ?assertEqual([
+    {<<"size/0001">>, antidote_crdt_orset},
+    {<<"size/0002">>, antidote_crdt_orset},
+    {<<"size/0004">>, antidote_crdt_orset},
+    {<<"size/0005">>, antidote_crdt_orset}
+  ], range_keys({inf, exclusive},
+                {inf, exclusive}, M2)),
+
+  ?assertEqual([
+    {<<"size/0001">>, antidote_crdt_orset},
+    {<<"size/0002">>, antidote_crdt_orset},
+    {<<"size/0004">>, antidote_crdt_orset}
+  ], range_keys({{<<"size/0001">>, antidote_crdt_orset}, inclusive},
+                {{<<"size/0005">>, antidote_crdt_orset}, exclusive}, M2)),
+
+  ?assertEqual([
+    {<<"size/0002">>, antidote_crdt_orset},
+    {<<"size/0004">>, antidote_crdt_orset},
+    {<<"size/0005">>, antidote_crdt_orset}
+  ], range_keys({{<<"size/0001">>, antidote_crdt_orset}, exclusive},
+                {{<<"size/0005">>, antidote_crdt_orset}, inclusive}, M2)),
+
+  ?assertEqual([
+    {<<"size/0001">>, antidote_crdt_orset},
+    {<<"size/0002">>, antidote_crdt_orset},
+    {<<"size/0004">>, antidote_crdt_orset},
+    {<<"size/0005">>, antidote_crdt_orset}
+  ], range_keys({{<<"size/0001">>, antidote_crdt_orset}, inclusive},
+                {{<<"size/0005">>, antidote_crdt_orset}, inclusive}, M2)),
+
+  ?assertEqual([
+    {{<<"size/0001">>, antidote_crdt_orset}, [<<"obj1">>]},
+    {{<<"size/0002">>, antidote_crdt_orset}, [<<"obj2">>]}
+  ], range_values({inf, exclusive},
+                {{<<"size/0004">>, antidote_crdt_orset}, exclusive}, M2)),
+
+  ok.
 
 -endif.
