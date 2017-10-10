@@ -38,6 +38,7 @@
                 antidote_crdt_integer,
                 antidote_crdt_map_aw,
                 antidote_crdt_map_rr,
+                antidote_crdt_ordered_map_rr,
                 antidote_crdt_fat_counter,
                 antidote_crdt_flag_ew,
                 antidote_crdt_flag_dw
