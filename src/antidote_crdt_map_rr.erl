@@ -116,6 +116,7 @@ downstream({reset, {}}, CurrentMap) ->
 
 -spec generate_downstream_update({typedKey(), Op::term()}, state()) -> nested_downstream().
 generate_downstream_update({{Key, Type}, Op}, CurrentMap) ->
+  io:format("generate_downstream_update ~p ~p ~p ~p~n", [Key, Type, Op, CurrentMap]),
   CurrentState =
     case dict:is_key({Key, Type}, CurrentMap) of
       true -> dict:fetch({Key, Type}, CurrentMap);
